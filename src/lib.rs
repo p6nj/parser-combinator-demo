@@ -16,6 +16,19 @@ impl Element {
             children,
         }
     }
+    fn make(name: &str, attributes: Vec<(&str, &str)>, children: Vec<Self>) -> Self
+    where
+        Self: Sized,
+    {
+        Element {
+            name: name.to_string(),
+            attributes: attributes
+                .iter()
+                .map(|(attibute, value)| (attibute.to_string(), value.to_string()))
+                .collect(),
+            children,
+        }
+    }
 }
 
 type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
@@ -294,7 +307,7 @@ where
 
 #[allow(dead_code)]
 fn element<'a>() -> impl Parser<'a, Element> {
-    either(single_element(), parent_element())
+    whitespace_wrap(either(single_element(), parent_element()))
 }
 
 #[allow(dead_code)]
@@ -319,12 +332,17 @@ where
 #[allow(dead_code)]
 fn parent_element<'a>() -> impl Parser<'a, Element> {
     open_element().and_then(|el| {
-        left(zero_or_more(element()), close_element(el.name.clone())).map(move |children| {
-            let mut el = el.clone();
-            el.children = children;
-            el
-        })
+        left(zero_or_more(element()), close_element(el.name.clone()))
+            .map(move |children| Element::new(el.name.clone(), el.attributes.clone(), children))
     })
+}
+
+#[allow(dead_code)]
+fn whitespace_wrap<'a, P, A>(parser: P) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+{
+    right(space0(), left(parser, space0()))
 }
 
 #[test]
@@ -434,4 +452,41 @@ fn single_element_parser() {
         )),
         single_element().parse("<div class=\"float\"/>")
     );
+}
+
+#[test]
+fn xml_parser() {
+    let doc = r#"
+        <top label="Top">
+            <semi-bottom label="Bottom"/>
+            <middle>
+                <bottom label="Another bottom"/>
+            </middle>
+        </top>"#;
+    let parsed_doc = Element::make(
+        "top",
+        vec![("label", "Top")],
+        vec![
+            Element::make("semi-bottom", vec![("label", "Bottom")], vec![]),
+            Element::make(
+                "middle",
+                vec![],
+                vec![Element::make(
+                    "bottom",
+                    vec![("label", "Another bottom")],
+                    vec![],
+                )],
+            ),
+        ],
+    );
+    assert_eq!(Ok(("", parsed_doc)), element().parse(doc));
+}
+
+#[test]
+fn mismatched_closing_tag() {
+    let doc = r#"
+        <top>
+            <bottom/>
+        </middle>"#;
+    assert_eq!(Err("</middle>"), element().parse(doc));
 }
